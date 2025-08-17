@@ -1,3 +1,149 @@
+const { ezra } = require("../fredi/ezra")
+const fs = require("fs");
+const path = require("path");
+const { sleep } = require("../lib/functions");
+
+const DATA_PATH = path.resolve(__dirname, "../data/send_data.json");
+if (!fs.existsSync(DATA_PATH)) {
+  fs.writeFileSync(
+    DATA_PATH,
+    JSON.stringify(
+      { templates: {}, sentToday: [], dailyCount: 0, lastReset: Date.now(), reports: [] },
+      null,
+      2
+    )
+  );
+}
+let store = JSON.parse(fs.readFileSync(DATA_PATH));
+
+function saveStore() {
+  fs.writeFileSync(DATA_PATH, JSON.stringify(store, null, 2));
+}
+
+function resetIfNeeded() {
+  const last = new Date(store.lastReset).toDateString();
+  const now = new Date().toDateString();
+  if (last !== now) {
+    store.sentToday = [];
+    store.dailyCount = 0;
+    store.lastReset = Date.now();
+    saveStore();
+  }
+}
+
+// ======================= SEND =======================
+ezra({ nomCom: "send", categorie: "owner", reaction: "📢" }, async (dest, zk, commandeOptions) => {
+  const { q, repondre, superUser } = commandeOptions;
+
+  resetIfNeeded();
+  if (!superUser) return repondre("🚫 Owner only.");
+  if (!q.includes("|"))
+    return repondre(
+      "❗ Please provide group names and message separated by '|'.\nExample: `.send Group1,Group2 | Hello everyone!`"
+    );
+
+  const [groupList, messageBody] = q.split("|").map((s) => s.trim());
+  const groupNames = groupList.split(",").map((g) => g.trim());
+
+  const greetings = ["Hey 👋", "Hi there 😊", "Hello 🙂", "Good day 🌟"];
+  let totalSent = 0,
+    totalFail = 0,
+    startTime = Date.now();
+
+  global.broadcastStop = false;
+
+  for (const groupName of groupNames) {
+    if (store.dailyCount >= 300) {
+      repondre("📛 Daily limit of 300 messages reached. Try again tomorrow.");
+      break;
+    }
+    if (global.broadcastStop) {
+      repondre("🛑 Broadcast stopped.");
+      break;
+    }
+
+    const allGroups = await zk.groupFetchAllParticipating();
+    const grp = Object.values(allGroups).find(
+      (g) => g.subject.toLowerCase() === groupName.toLowerCase()
+    );
+    if (!grp) continue;
+
+    const meta = await zk.groupMetadata(grp.id);
+    const members = meta.participants
+      .map((p) => p.id)
+      .filter((id) => !store.sentToday.includes(id));
+
+    for (const userId of members) {
+      if (store.dailyCount >= 300) break;
+      if (global.broadcastStop) break;
+
+      await zk.sendPresenceUpdate("composing", userId);
+      await sleep(Math.floor(Math.random() * 2000) + 2000);
+
+      const greeting = greetings[Math.floor(Math.random() * greetings.length)];
+      const text = `${greeting}\n${messageBody}`;
+
+      try {
+        await zk.sendMessage(userId, { text });
+        store.sentToday.push(userId);
+        store.dailyCount++;
+        totalSent++;
+      } catch {
+        totalFail++;
+      }
+
+      saveStore();
+      await repondre(
+        `Progress: ${totalSent} sent, ${totalFail} failed, ${store.dailyCount}/300 today`
+      );
+    }
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  repondre(
+    `✅ Broadcast complete!\n🕒 Time: ${elapsed}s\n📤 Sent: ${totalSent}\n❌ Failed: ${totalFail}`
+  );
+});
+
+// ======================= STOP =======================
+ezra({ nomCom: "stop", categorie: "owner", reaction: "🛑" }, async (dest, zk, commandeOptions) => {
+  const { superUser, repondre } = commandeOptions;
+
+  if (!superUser) return repondre("🚫 Owner only.");
+  global.broadcastStop = true;
+  repondre("🛑 Broadcast stop requested. It will halt after the current message.");
+});
+
+// ======================= SAVE TEMPLATE =======================
+ezra({ nomCom: "savetemplate", categorie: "owner", reaction: "💾" }, async (dest, zk, commandeOptions) => {
+  const { q, superUser, repondre } = commandeOptions;
+
+  if (!superUser) return repondre("🚫 Owner only.");
+  if (!q.includes("|")) return repondre("❗ Usage: `.savetemplate <name> | <message>`");
+
+  const [name, content] = q.split("|").map((s) => s.trim());
+  store.templates[name] = content;
+  saveStore();
+
+  repondre(`✅ Template "${name}" saved!`);
+});
+
+// ======================= LIST GROUPS =======================
+ezra({ nomCom: "listgroups", categorie: "owner", reaction: "📋" }, async (dest, zk, commandeOptions) => {
+  const { superUser, repondre } = commandeOptions;
+
+  if (!superUser) return repondre("🚫 Owner only.");
+
+  const allGroups = await zk.groupFetchAllParticipating();
+  let text = "📋 *Your Groups List* 📋\n\n";
+
+  let count = 1;
+  for (const group of Object.values(allGroups)) {
+    text += `${count++}. ${group.subject}\n🆔 ${group.id}\n\n`;
+  }
+
+  repondre(text);
+});
 
 
 const { ezra } = require("../fredi/ezra")
@@ -31,7 +177,7 @@ ezra({ nomCom: "tagall", categorie: 'Group', reaction: "📯" }, async (dest, zk
   let membresGroupe = verifGroupe ? await infosGroupe.participants : ""
   var tag = ""; 
   tag += `========================\n  
-        🌟 *MAKAMESCO-𝐌𝐃*𝕋𝔸𝔾𝔾𝔼𝔻 🌟
+        🌟 *TERAN-XMD*𝕋𝔸𝔾𝔾𝔼𝔻 🌟
 ========================\n
 👥 Group : ${nomGroupe} 🚀 
 👤 Autor : *${nomAuteurMessage}* 👋 
